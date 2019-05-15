@@ -1,0 +1,22 @@
+version: '3.4'
+
+services:
+
+  mongo.data:
+    image: mongo
+
+  webbookmarks.silo:
+    image: ${DOCKER_REGISTRY-}webbookmarks_silo
+    build:
+      context: .
+      dockerfile: src/WebBookmarks.Silo/Dockerfile
+    depends_on:
+     - mongo.data
+
+  webbookmarks.api:
+    image: ${DOCKER_REGISTRY-}webbookmarks_api
+    build:
+      context: .
+      dockerfile: src/WebBookmarks.API/Dockerfile
+    depends_on:
+     - webbookmarks.silo

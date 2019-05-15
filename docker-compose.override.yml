@@ -1,0 +1,19 @@
+version: '3.4'
+
+
+services:
+  
+  mongo.data:
+    ports:
+      - "27017:27017"
+    
+
+  webbookmarks.api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://0.0.0.0:80
+    ports:
+      - "5102:80"
+    
+
+

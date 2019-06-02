@@ -17,6 +17,7 @@ using System.Net.Sockets;
 using Orleans.Configuration;
 using System.IO;
 using System.Collections.Generic;
+using Orleans.Hosting;
 
 namespace WebBookmarks.API
 {
@@ -38,14 +39,13 @@ namespace WebBookmarks.API
             services
                 .AddCustomMVC()
                 .AddSwagger()
-                .AddClusterClient(Configuration, _logger).Wait();
-
+                .AddSingleton<IClusterClient>(CreateClusterClient);
         }
 
 
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env)
+        public void Configure(IApplicationBuilder app, Microsoft.AspNetCore.Hosting.IHostingEnvironment env)
         {
             if (env.IsDevelopment())
             {
@@ -65,6 +65,38 @@ namespace WebBookmarks.API
 
             app.UseHttpsRedirection();
             app.UseMvcWithDefaultRoute();
+        }
+
+        private IClusterClient CreateClusterClient(IServiceProvider serviceProvider)
+        {
+            var log = serviceProvider.GetService<ILogger<Startup>>();
+
+            var client = new ClientBuilder()
+                .ConfigureApplicationParts(parts =>
+                {
+                    parts.AddApplicationPart(typeof(IBookmarkStorageGrain).Assembly).WithReferences();
+                })
+                .Configure<ClusterOptions>(options =>
+                {
+                    options.ClusterId = "dev";
+                    options.ServiceId = "WebBookmarks";
+                })
+                .UseMongoDBClustering(config =>
+                {
+                    config.ConnectionString = "mongodb://mongo.data";
+                    config.DatabaseName = "WebBookmarksClusters";
+                })
+                .Build();
+
+            client.Connect(RetryFilter).GetAwaiter().GetResult();
+            return client;
+
+            async Task<bool> RetryFilter(Exception exception)
+            {
+                log?.LogWarning("Exception while attempting to connect to Orleans cluster: {Exception}", exception);
+                await Task.Delay(TimeSpan.FromSeconds(2));
+                return true;
+            }
         }
     }
 
@@ -99,8 +131,8 @@ namespace WebBookmarks.API
             return services;
         }
 
-        public async static Task<IServiceCollection> AddClusterClient(this IServiceCollection services, IConfiguration config, ILogger<Startup> logger)
-        {
+        //public async static Task<IServiceCollection> AddClusterClient(this IServiceCollection services, IConfiguration config, ILogger<Startup> logger)
+        //{
             //var config = new ConfigurationBuilder()
             //    .SetBasePath(Directory.GetCurrentDirectory())
             //    .AddInMemoryCollection(new Dictionary<string, string> // add default settings, that will be overridden by commandline
@@ -158,48 +190,53 @@ namespace WebBookmarks.API
             //}
 
 
+            //----------------------------------------------------------------------------------------
+
+        //    var ipAddress = IPAddress.Parse(GetLocalIPAddress());
+        //    var iPEndPoint = new IPEndPoint(ipAddress, 1001);
+
+        //    var client = new ClientBuilder()
+        //        //.UseLocalhostClustering(gatewayPort: 1001, clusterId: "dev", serviceId: config["ServiceId"])
+        //        .Configure
+        //        <ClusterOptions>(options =>
+        //        {
+        //            options.ClusterId = "dev";
+        //            options.ServiceId = config["ServiceId"];
+        //        })
+        //        .UseStaticClustering(iPEndPoint)
+        //        .ConfigureApplicationParts(parts =>
+        //        {
+        //            parts.AddApplicationPart(typeof(IBookmarkStorageGrain).Assembly).WithReferences();
+        //        })
+        //        .ConfigureLogging(_ => _.AddConsole())
+        //        .Build();
+
+        //    var retry = Policy.Handle<AggregateException>()
+        //                    .WaitAndRetryAsync(new TimeSpan[]
+        //                    {
+        //                            TimeSpan.FromSeconds(3),
+        //                            TimeSpan.FromSeconds(5),
+        //                            TimeSpan.FromSeconds(8)
+        //                    });
 
 
+        //    try
+        //    {
+        //        await retry.ExecuteAsync(async () =>
+        //        {
+        //            logger.LogInformation("Trying to connect to the Silo.");
+        //            await client.Connect();
+        //        });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        logger.LogError(ex, "The Client can't connect to Silo.");
+        //        throw;
+        //    }
 
-
-            IPAddress ipAddress = IPAddress.Parse(GetLocalIPAddress());
-            IPEndPoint iPEndPoint = new IPEndPoint(ipAddress, 5101);
-
-            var client = new ClientBuilder()
-                .UseLocalhostClustering(gatewayPort: 30000, clusterId: "dev", serviceId: config["ServiceId"])
-                .ConfigureApplicationParts(parts =>
-                {
-                    parts.AddApplicationPart(typeof(IBookmarkStorageGrain).Assembly).WithReferences();
-                })
-                .ConfigureLogging(_ => _.AddConsole())
-                .Build();
-
-            var retry = Policy.Handle<AggregateException>()
-                            .WaitAndRetryAsync(new TimeSpan[]
-                            {
-                                    TimeSpan.FromSeconds(3),
-                                    TimeSpan.FromSeconds(5),
-                                    TimeSpan.FromSeconds(8)
-                            });
-
-
-            try
-            {
-                await retry.ExecuteAsync(async () =>
-                {
-                    logger.LogInformation("Trying to connect to the Silo.");
-                    await client.Connect();
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "The Client can't connect to Silo.");
-                throw;
-            }
-
-            services.AddSingleton(client);
-            return services;
-        }
+        //    services.AddSingleton(client);
+        //    return services;
+        //}
 
         private static string GetLocalIPAddress()
         {
@@ -213,5 +250,8 @@ namespace WebBookmarks.API
             }
             throw new Exception("No network adapters with an IPv4 address in the system!");
         }
+
+
+        
     }
 }

@@ -1,7 +1,6 @@
 FROM mcr.microsoft.com/dotnet/core/runtime:2.2-stretch-slim AS base
 WORKDIR /app
 
-
 FROM mcr.microsoft.com/dotnet/core/sdk:2.2-stretch AS build
 WORKDIR /src
 COPY ["src/WebBookmarks.Silo/WebBookmarks.Silo.csproj", "src/WebBookmarks.Silo/"]

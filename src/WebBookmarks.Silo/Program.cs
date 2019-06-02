@@ -11,94 +11,69 @@ using System;
 using WebBookmarks.Grains;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
+using System.Runtime.Loader;
 
 namespace WebBookmarks.Silo
 {
     public class Program
     {
-        public static async Task Main(string[] args)
+        private static ISiloHost silo;
+        private static readonly ManualResetEvent siloStopped = new ManualResetEvent(false);
+
+        public static void Main(string[] args)
         {
             var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
 
-            IHostBuilder host;
-            IConfiguration configuration = GetConfiguration();
 
-            IPAddress ipAddress = IPAddress.Parse(GetLocalIPAddress());
-            IPEndPoint iPEndPoint = new IPEndPoint(ipAddress, 5101);
+            silo = new SiloHostBuilder()
+                .Configure<ClusterOptions>(options =>
+                {
+                    options.ClusterId = "dev";
+                    options.ServiceId = "WebBookmarks";
+                })
+                .ConfigureEndpoints(siloPort: 11111, gatewayPort: 30000)
+                .UseMongoDBClustering(config =>
+                {
+                    config.ConnectionString = "mongodb://mongo.data";
+                    config.DatabaseName = "WebBookmarksClusters";
+                })
+                .AddMongoDBGrainStorage("mongodb", options =>
+                {
+                    options.ConnectionString = "mongodb://mongo.data";
+                    options.DatabaseName = "WebBookmarksDB";
+                })
+                .ConfigureApplicationParts(parts =>
+                {
+                    parts.AddApplicationPart(typeof(BookmarkStorage).Assembly).WithReferences();
+                })
+                .ConfigureLogging(builder => builder.SetMinimumLevel(LogLevel.Warning).AddConsole())
+                .Build();
 
-            try
+            Task.Run(StartSilo);
+
+            AssemblyLoadContext.Default.Unloading += context =>
             {
-                host = new HostBuilder()
-                    .UseEnvironment(environment)
-                    .ConfigureAppConfiguration(config =>
-                    {
-                        config.AddConfiguration(configuration);
-                    })
-                    .UseOrleans((context, siloBuilder) =>
-                    {
-
-
-                        siloBuilder
-                            .ConfigureEndpoints(siloPort: 11111, gatewayPort: 30000)
-                            //.UseDevelopmentClustering(iPEndPoint)
-                            .UseLocalhostClustering(/*gatewayPort: 5101, siloPort: 5101*/)
-                            .Configure<ClusterOptions>(options =>
-                            {
-                                options.ClusterId = "dev";
-                                options.ServiceId = "WebBookmarks";
-                            })
-                            .AddMongoDBGrainStorage("mongodb", options =>
-                            {
-                                options.ConnectionString = "mongodb://localhost:27017";
-                                options.DatabaseName = "WebBookmarksDB";
-                            })
-                            .ConfigureApplicationParts(parts =>
-                            {
-                                parts.AddApplicationPart(typeof(BookmarkStorage).Assembly).WithReferences();
-                            });
-                            //.Configure<EndpointOptions>(options =>
-                            //{
-                            //    options.GatewayListeningEndpoint = iPEndPoint;
-                            //    options.SiloListeningEndpoint = iPEndPoint;
-                            //    options.SiloPort = 5101;
-                            //});
-                    })
-                    //.ConfigureServices((context, services) =>
-                    //{
-                    //    //var config = context.Configuration;
-                    //    //var conStringbookmarksDB = config.GetConnectionString("BookmarkDb");
-
-                    //})
-                    .ConfigureLogging((context, logging) =>
-                    {
-                        logging.AddConfiguration(context.Configuration.GetSection("Logging"));
-                        logging.AddConsole();
-                    });
-
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Error building silo host: " + ex.InnerException.Message);
-                throw;
-            }
-
-            // Make Ctrl-C stop our process
-            Console.CancelKeyPress += (sender, e) =>
-            {
-                Environment.Exit(0);
+                Task.Run(StopSilo);
+                siloStopped.WaitOne();
             };
 
-            try
-            {
-                Console.WriteLine("Silo starting...");
-                await host.Build().StartAsync();
-                Console.WriteLine("Silo started");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Silo could not be started with exception: " + ex.InnerException.Message);
-            }
+            siloStopped.WaitOne();
         }
+
+        private static async Task StartSilo()
+        {
+            await silo.StartAsync();
+            Console.WriteLine("Silo started");
+        }
+
+        private static async Task StopSilo()
+        {
+            await silo.StopAsync();
+            Console.WriteLine("Silo stopped");
+            siloStopped.Set();
+        }
+
 
         private static IConfiguration GetConfiguration()
         {
@@ -122,5 +97,6 @@ namespace WebBookmarks.Silo
             }
             throw new Exception("No network adapters with an IPv4 address in the system!");
         }
+
     }
 }

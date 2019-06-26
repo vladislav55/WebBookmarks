@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "WebBookmarks.Silo": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}
